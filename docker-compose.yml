@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  postgres-primary:
+    image: postgres:15
+    container_name: postgres-primary
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: mydb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+      - ./primary/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./primary/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./primary/pg_hba.conf:/etc/postgresql/pg_hba.conf
+    command: >
+      postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - pg_network
+
+  postgres-replica-1:
+    image: postgres:15
+    container_name: postgres-replica-1
+    restart: always
+    user: postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5434:5432"
+    depends_on:
+      - postgres-primary
+    command: >
+      bash -c "
+        rm -rf /var/lib/postgresql/data/*;
+        until PGPASSWORD=admin psql -h postgres-primary -U admin -d mydb -c 'SELECT 1' > /dev/null 2>&1; do
+          echo 'Waiting for mydb to be ready...';
+          sleep 1;
+        done;
+        PGPASSWORD=replicator pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U replicator -Fp -Xs -P -R;
+        exec docker-entrypoint.sh postgres"
+    volumes:
+      - pg_replica_1_data:/var/lib/postgresql/data
+    networks:
+      - pg_network
+
+  postgres-replica-2:
+    image: postgres:15
+    container_name: postgres-replica-2
+    restart: always
+    user: postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5436:5432"
+    depends_on:
+      - postgres-primary
+    command: >
+      bash -c "
+        rm -rf /var/lib/postgresql/data/*;
+        until PGPASSWORD=admin psql -h postgres-primary -U admin -d mydb -c 'SELECT 1' > /dev/null 2>&1; do
+          echo 'Waiting for mydb to be ready...';
+          sleep 1;
+        done;
+        PGPASSWORD=replicator pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U replicator -Fp -Xs -P -R;
+        exec docker-entrypoint.sh postgres"
+    volumes:
+      - pg_replica_2_data:/var/lib/postgresql/data
+    networks:
+      - pg_network
+
+volumes:
+  pg_primary_data:
+  pg_replica_1_data:
+  pg_replica_2_data:
+
+networks:
+  pg_network:
